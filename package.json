@@ -1,0 +1,15 @@
+{
+  "name": "async-standup-bot",
+  "version": "0.0.1",
+  "description": "Slackbot to do async standup from iDoneThis",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "Jack Lund",
+  "license": "ISC",
+  "dependencies": {
+    "botkit": "0.0.5",
+    "restify": "^4.0.3"
+  }
+}
