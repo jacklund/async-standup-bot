@@ -145,6 +145,10 @@ controller.hears('tomorrow (.*)', ['direct_message'], function(bot, message) {
   bot.reply(message, 'Registered item to be done');
 });
 
+controller.hears('.*', ['direct_message'], function(bot, message) {
+  bot.reply(message, 'Sorry, you must begin your message with either "today" or "tomorrow"');
+});
+
 // var client = createIDoneThisClient();
 //
 // client.get('/api/v0.1/dones/?team=cosmos-data&done_date=yesterday', function(err, req, res, obj) {
