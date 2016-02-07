@@ -1,5 +1,11 @@
+var botkit = require('botkit');
 var restify = require('restify');
 var util = require('util');
+
+if (!process.env.token) {
+  console.log('Error: Specify Slack integration token in environment');
+  process.exit(1);
+}
 
 function createIDoneThisClient() {
   return restify.createJsonClient({
@@ -50,14 +56,103 @@ function standupString(person, values) {
                      person, formatList(values.dones), formatList(values.goals));
 }
 
-var client = createIDoneThisClient();
+var useridsToUsers = {}
 
-client.get('/api/v0.1/dones/?team=cosmos-data&done_date=yesterday', function(err, req, res, obj) {
-  if (err) {
-    console.log('err is: ', err);
+function getRealName(user) {
+  return useridsToUsers[user].real_name;
+}
+
+function getIDoneThisUserId(conversation) {
+  conversation.ask("Can you tell me your iDoneThis userid, or type 'done' to quit?", [
+    {
+      pattern: 'done',
+      callback: function(response, conversation) {
+        conversation.say("Buh-bye!");
+        conversation.next();
+      }
+    },
+
+    {
+      default: true,
+        callback: function(response, conversation) {
+          conversation.next();
+          conversation.ask("So, your userid is " + response.text + ", is that correct?", [
+            {
+              pattern: bot.utterances.yes,
+              callback: function(response, conversation) {
+                conversation.next();
+                conversation.say("Thank you, userid saved");
+              }
+            },
+            {
+              pattern: bot.utterances.no,
+              callback: function(response, conversation) {
+                conversation.next();
+                conversation.say("Okay, let's try again");
+                getIDoneThisUserId(conversation);
+              }
+            },
+            {
+              default: true,
+                callback: function(response, conversation) {
+                  conversation.next();
+                  conversation.say("I'm sorry, I didn't understand your response, good-bye!");
+                }
+            }
+          ]);
+        }
+    }
+  ]);
+}
+
+var controller = botkit.slackbot();
+var bot = controller.spawn(
+  {
+    token: process.env.token,
+    json_file_store: 'botstore.json'
   }
-  values = parseResults(obj.results);
-  for (var person in values) {
-    console.log(standupString(person, values[person]));
+);
+
+bot.startRTM(function(err,bot,payload) {
+  if (err) {
+    console.log(err);
+  } else {
+    console.log("Connected to RTM");
+    for (var i = 0; i < payload.users.length; ++i) {
+      useridsToUsers[payload.users[i].id] = payload.users[i];
+    }
   }
 });
+
+controller.hears('use idonethis', ['direct_message'], function(bot, message) {
+  bot.startPrivateConversation(message, function(err, conversation) {
+    conversation.say("Hello " + getRealName(message.user));
+    getIDoneThisUserId(conversation);
+  });
+});
+
+controller.hears('today (.*)', ['direct_message'], function(bot, message) {
+  var matches = message.text.match(/today (.*)/i);
+  var done = matches[1];
+  console.log(done);
+  bot.reply(message, 'Registered item done');
+});
+
+controller.hears('tomorrow (.*)', ['direct_message'], function(bot, message) {
+  var matches = message.text.match(/tomorrow (.*)/i);
+  var done = matches[1];
+  console.log(done);
+  bot.reply(message, 'Registered item to be done');
+});
+
+// var client = createIDoneThisClient();
+//
+// client.get('/api/v0.1/dones/?team=cosmos-data&done_date=yesterday', function(err, req, res, obj) {
+//   if (err) {
+//     console.log('err is: ', err);
+//   }
+//   values = parseResults(obj.results);
+//   for (var person in values) {
+//     console.log(standupString(person, values[person]));
+//   }
+// });
