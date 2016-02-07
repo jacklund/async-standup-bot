@@ -145,6 +145,14 @@ controller.hears('tomorrow (.*)', ['direct_message'], function(bot, message) {
   bot.reply(message, 'Registered item to be done');
 });
 
+controller.hears('help', ['direct_message'], function(bot, message) {
+  bot.reply(message, 'Available commands:\n'
+            + '\t_today <single completed task>_ - add a task to your completed tasks\n'
+            + '\t_tomorrow <single anticipated task>_ - add a task to your tasks to do tomorrow\n'
+            + '\t_use idonethis_ - set up to retrieve task lists from iDoneThis.com\n'
+            + '\t_help_ - this message');
+});
+
 controller.hears('.*', ['direct_message'], function(bot, message) {
   bot.reply(message, 'Sorry, you must begin your message with either "today" or "tomorrow"');
 });
