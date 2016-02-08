@@ -62,49 +62,6 @@ function getRealName(user) {
   return useridsToUsers[user].real_name;
 }
 
-function getIDoneThisUserId(conversation) {
-  conversation.ask("Can you tell me your iDoneThis userid, or type 'done' to quit?", [
-    {
-      pattern: 'done',
-      callback: function(response, conversation) {
-        conversation.say("Buh-bye!");
-        conversation.next();
-      }
-    },
-
-    {
-      default: true,
-        callback: function(response, conversation) {
-          conversation.next();
-          conversation.ask("So, your userid is " + response.text + ", is that correct?", [
-            {
-              pattern: bot.utterances.yes,
-              callback: function(response, conversation) {
-                conversation.next();
-                conversation.say("Thank you, userid saved");
-              }
-            },
-            {
-              pattern: bot.utterances.no,
-              callback: function(response, conversation) {
-                conversation.next();
-                conversation.say("Okay, let's try again");
-                getIDoneThisUserId(conversation);
-              }
-            },
-            {
-              default: true,
-                callback: function(response, conversation) {
-                  conversation.next();
-                  conversation.say("I'm sorry, I didn't understand your response, good-bye!");
-                }
-            }
-          ]);
-        }
-    }
-  ]);
-}
-
 var controller = botkit.slackbot();
 var bot = controller.spawn(
   {
@@ -113,48 +70,205 @@ var bot = controller.spawn(
   }
 );
 
+var channels = {}
+
 bot.startRTM(function(err,bot,payload) {
   if (err) {
     console.log(err);
   } else {
-    console.log("Connected to RTM");
     for (var i = 0; i < payload.users.length; ++i) {
       useridsToUsers[payload.users[i].id] = payload.users[i];
     }
+    for (var i = 0; i < payload.channels.length; ++i) {
+      channels[payload.channels[i].name] = payload.channels[i];
+    }
+    console.log("Connected to RTM");
   }
 });
 
-controller.hears('use idonethis', ['direct_message'], function(bot, message) {
+function verifyOrExit(prompt, valueName, conversation, cback, verify) {
+  conversation.ask(prompt + " [" + valueName + ", or 'done' to cancel]", function(response, conversation) {
+    if (response.text == 'done') {
+      conversation.say("Cancelled. Buh-bye!");
+      conversation.next();
+    } else {
+      conversation.next();
+      value = response.text;
+      conversation.ask("You said, '" + response.text + "', correct?", [
+        {
+          pattern: bot.utterances.yes,
+          callback: function(response, conversation) {
+            conversation.next();
+            if (verify) {
+              verify(value, cback);
+            } else {
+              cback(value);
+            }
+          }
+        },
+
+        {
+          pattern: bot.utterances.no,
+          callback: function(response, conversation) {
+            conversation.say("Okay, let's try again");
+            verifyOrExit(prompt, valueName, conversation, cback);
+          }
+        },
+
+        {
+          pattern: "done(.*)",
+          callback: function(response, conversation) {
+            conversation.say("Cancelled. Buh-bye!");
+            conversation.next();
+            cback(undefined);
+          }
+        },
+
+        {
+          default: true,
+          callback: function(response, conversation) {
+            conversation.say("I'm sorry, I didn't understand your response.");
+            conversation.next();
+            verifyOrExit(prompt, valueName, conversation, cback);
+          }
+        }
+      ]);
+    }
+  });
+}
+
+function setChannelForUser(user, channelName) {
+  console.log(channelName);
+}
+
+function setupChannel(bot, message, conversation) {
+  verifyOrExit("What channel would you like your standup posted to?",
+               "channel-name",
+               conversation,
+               function(value) {
+                 if (value) {
+                   setChannelForUser(message.user, value);
+                   setupIDoneThis(bot, message, conversation);
+                 } else {
+                   setupChannel(bot, message, conversation);
+                 }
+               },
+              function(value, callback) {
+                if (value in channels) {
+                  callback(value);
+                } else {
+                  conversation.say("I'm sorry, that's not a valid channel name");
+                  callback(undefined);
+                }
+              });
+}
+
+function setIDoneThisId(user, id) {
+  console.log(id);
+}
+
+function printUsage(bot, message, conversation) {
+  conversation.say("Alright, you're all set up\n"
+                   + "To add new completed tasks, DM me '_today task_', e.g., 'today I completed X'\n"
+                   + "For upcoming tasks, DM me '_tomorrow task_'\n"
+                   + "If you're an iDoneThis user, I'll take the tasks from there as well");
+}
+
+function setupIDoneThis(bot, message, conversation) {
+  conversation.ask("Are you an iDoneThis.com user, and would you like to use it for your standup tasks?", [
+    {
+      pattern: bot.utterances.yes,
+      callback: function(response, conversation) {
+        conversation.next();
+        verifyOrExit("What is your iDoneThis userid?",
+                     "userid",
+                     conversation,
+                     function(value) {
+                       setIDoneThisId(message.user, value);
+                       printUsage(bot, message, conversation);
+                     });
+      }
+    },
+
+    {
+      pattern: bot.utterances.no,
+      callback: function(response, conversation) {
+        printUsage(bot, message, conversation);
+      }
+    },
+
+    {
+      default: true,
+      callback: function(response, conversation) {
+        conversation.next();
+        conversation.say("I'm sorry, I don't understand your response");
+        setupIDoneThis(bot, message, conversation);
+      }
+    }
+  ]);
+}
+
+function doSetup(bot, message) {
   bot.startPrivateConversation(message, function(err, conversation) {
     conversation.say("Hello " + getRealName(message.user));
-    getIDoneThisUserId(conversation);
+    setupChannel(bot, message, conversation);
   });
-});
+}
 
-controller.hears('today (.*)', ['direct_message'], function(bot, message) {
+function doToday(bot, message) {
   var matches = message.text.match(/today (.*)/i);
   var done = matches[1];
   console.log(done);
   bot.reply(message, 'Registered item done');
-});
+}
 
-controller.hears('tomorrow (.*)', ['direct_message'], function(bot, message) {
+function doTomorrow(bot, message) {
   var matches = message.text.match(/tomorrow (.*)/i);
   var done = matches[1];
   console.log(done);
   bot.reply(message, 'Registered item to be done');
-});
+}
 
-controller.hears('help', ['direct_message'], function(bot, message) {
-  bot.reply(message, 'Available commands:\n'
-            + '\t_today <single completed task>_ - add a task to your completed tasks\n'
-            + '\t_tomorrow <single anticipated task>_ - add a task to your tasks to do tomorrow\n'
-            + '\t_use idonethis_ - set up to retrieve task lists from iDoneThis.com\n'
-            + '\t_help_ - this message');
-});
+helpString = "Available commands:\n";
+
+function doHelp(bot, message) {
+  bot.reply(message, helpString);
+}
+
+commands = {
+  'setup': {
+    callback: doSetup,
+    usage: 'setup',
+    description: 'Set up user'
+  },
+
+  'today (.*)': {
+    callback: doToday,
+    usage: 'today <single completed task>',
+    description: 'add a task to your completed tasks'
+  },
+
+  'tomorrow (.*)': {
+    callback: doTomorrow,
+    usage: 'tomorrow <single anticipated task>',
+    description: 'add a task to your tasks to be done tomorrow',
+  },
+
+  'help': {
+    callback: doHelp,
+    usage: 'help',
+    description: 'this message'
+  }
+}
+
+for (command in commands) {
+  controller.hears(command, ['direct_message'], commands[command].callback);
+  helpString += '\t_' + commands[command].usage + '_ - ' + commands[command].description + '\n';
+}
 
 controller.hears('.*', ['direct_message'], function(bot, message) {
-  bot.reply(message, 'Sorry, you must begin your message with either "today" or "tomorrow"');
+  bot.reply(message, "Sorry, I don't understand '" + message.text + "'");
+  doHelp(bot, message);
 });
 
 // var client = createIDoneThisClient();
