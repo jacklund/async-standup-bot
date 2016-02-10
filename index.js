@@ -65,7 +65,7 @@ function getRealName(user) {
 var controller = botkit.slackbot();
 var bot = controller.spawn(
   {
-    token: process.env.token,
+    token: process.env.slack_token,
     json_file_store: 'botstore.json'
   }
 );
@@ -137,17 +137,17 @@ function verifyOrExit(prompt, valueName, conversation, cback, verify) {
   });
 }
 
-function setChannelForUser(user, channelName) {
-  console.log(channelName);
+function setChannelForUser(user, channel) {
+  console.log(channel);
 }
 
 function setupChannel(bot, message, conversation) {
   verifyOrExit("What channel would you like your standup posted to?",
                "channel-name",
                conversation,
-               function(value) {
-                 if (value) {
-                   setChannelForUser(message.user, value);
+               function(channel) {
+                 if (channel) {
+                   setChannelForUser(message.user, channel);
                    setupIDoneThis(bot, message, conversation);
                  } else {
                    setupChannel(bot, message, conversation);
@@ -155,7 +155,7 @@ function setupChannel(bot, message, conversation) {
                },
               function(value, callback) {
                 if (value in channels) {
-                  callback(value);
+                  callback(channels[value]);
                 } else {
                   conversation.say("I'm sorry, that's not a valid channel name");
                   callback(undefined);
@@ -215,18 +215,40 @@ function doSetup(bot, message) {
   });
 }
 
+function initializeUser() {
+  return {
+        id: message.user,
+        today: [],
+        tomorrow: []
+      }
+}
+
 function doToday(bot, message) {
   var matches = message.text.match(/today (.*)/i);
   var done = matches[1];
-  console.log(done);
-  bot.reply(message, 'Registered item done');
+  controller.storage.users.get(message.user, function(err, user) {
+    if (!user) {
+      user = initializeUser();
+    }
+    user.today.push(done);
+    controller.storage.users.save(user, function(err, id) {
+      bot.reply(message, 'Registered item done');
+    });
+  });
 }
 
 function doTomorrow(bot, message) {
   var matches = message.text.match(/tomorrow (.*)/i);
   var done = matches[1];
-  console.log(done);
-  bot.reply(message, 'Registered item to be done');
+  controller.storage.users.get(message.user, function(err, user) {
+    if (!user) {
+      user = initializeUser();
+    }
+    user.tomorrow.push(done);
+    controller.storage.users.save(user, function(err, id) {
+      bot.reply(message, 'Registered item to be done');
+    });
+  });
 }
 
 helpString = "Available commands:\n";
