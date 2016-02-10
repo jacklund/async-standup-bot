@@ -2,7 +2,7 @@ var botkit = require('botkit');
 var restify = require('restify');
 var util = require('util');
 
-if (!process.env.token) {
+if (!process.env.slack_token) {
   console.log('Error: Specify Slack integration token in environment');
   process.exit(1);
 }
@@ -62,15 +62,18 @@ function getRealName(user) {
   return useridsToUsers[user].real_name;
 }
 
-var controller = botkit.slackbot();
+var controller = botkit.slackbot({
+    json_file_store: 'json_data'
+});
+
 var bot = controller.spawn(
   {
-    token: process.env.slack_token,
-    json_file_store: 'botstore.json'
+    token: process.env.slack_token
   }
 );
 
-var channels = {}
+var channelNamesToChannels = {}
+var channelIdsToChannels = {}
 
 bot.startRTM(function(err,bot,payload) {
   if (err) {
@@ -80,7 +83,8 @@ bot.startRTM(function(err,bot,payload) {
       useridsToUsers[payload.users[i].id] = payload.users[i];
     }
     for (var i = 0; i < payload.channels.length; ++i) {
-      channels[payload.channels[i].name] = payload.channels[i];
+      channelNamesToChannels[payload.channels[i].name] = payload.channels[i];
+      channelIdsToChannels[payload.channels[i].id] = payload.channels[i];
     }
     console.log("Connected to RTM");
   }
@@ -137,8 +141,44 @@ function verifyOrExit(prompt, valueName, conversation, cback, verify) {
   });
 }
 
-function setChannelForUser(user, channel) {
-  console.log(channel);
+function initializeUser(userid) {
+  return {
+    id: userid,
+    today: [],
+    tomorrow: []
+  }
+}
+
+function initializeChannel(channelid) {
+  return {
+    id: channelid,
+    users: []
+  }
+}
+
+function setChannelForUser(userid, channelid, callback) {
+  controller.storage.users.get(userid, function(err, user) {
+    if (!user) {
+      user = initializeUser(userid);
+    }
+    if (user.channel) {
+      callback('User is already assigned to channel '
+               + channelIdsToChannels[user.channel].name);
+    }
+    controller.storage.channels.get(channelid, function(err, channel) {
+      if (!channel) {
+        channel= initializeChannel(channelid);
+      }
+      channel.users.push(userid);
+      user.channel = channelid;
+      controller.storage.channels.save(channel, function(err) {
+        if (err) callback(err);
+        controller.storage.users.save(user, function(err) {
+          callback(err);
+        });
+      });
+    });
+  });
 }
 
 function setupChannel(bot, message, conversation) {
@@ -147,15 +187,20 @@ function setupChannel(bot, message, conversation) {
                conversation,
                function(channel) {
                  if (channel) {
-                   setChannelForUser(message.user, channel);
-                   setupIDoneThis(bot, message, conversation);
+                   setChannelForUser(message.user, channel.id, function(err) {
+                     if (err) {
+                       conversation.say(err);
+                     } else {
+                       setupIDoneThis(bot, message, conversation);
+                     }
+                   });
                  } else {
                    setupChannel(bot, message, conversation);
                  }
                },
               function(value, callback) {
-                if (value in channels) {
-                  callback(channels[value]);
+                if (value in channelNamesToChannels) {
+                  callback(channelNamesToChannels[value]);
                 } else {
                   conversation.say("I'm sorry, that's not a valid channel name");
                   callback(undefined);
@@ -169,8 +214,8 @@ function setIDoneThisId(user, id) {
 
 function printUsage(bot, message, conversation) {
   conversation.say("Alright, you're all set up\n"
-                   + "To add new completed tasks, DM me '_today task_', e.g., 'today I completed X'\n"
-                   + "For upcoming tasks, DM me '_tomorrow task_'\n"
+                   + "To add new completed tasks, DM me _today task_, e.g., 'today I completed X'\n"
+                   + "For upcoming tasks, DM me _tomorrow task_\n"
                    + "If you're an iDoneThis user, I'll take the tasks from there as well");
 }
 
@@ -193,6 +238,7 @@ function setupIDoneThis(bot, message, conversation) {
     {
       pattern: bot.utterances.no,
       callback: function(response, conversation) {
+        conversation.next();
         printUsage(bot, message, conversation);
       }
     },
@@ -213,14 +259,6 @@ function doSetup(bot, message) {
     conversation.say("Hello " + getRealName(message.user));
     setupChannel(bot, message, conversation);
   });
-}
-
-function initializeUser() {
-  return {
-        id: message.user,
-        today: [],
-        tomorrow: []
-      }
 }
 
 function doToday(bot, message) {
